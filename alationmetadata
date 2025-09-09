@@ -1,0 +1,94 @@
+import requests
+import json
+import os
+
+# Environment variables for security
+ALATION_URL = os.getenv("ALATION_URL")        # e.g. "https://alation.mycompany.com"
+ALATION_API_TOKEN = os.getenv("ALATION_API_TOKEN")  # API token
+
+HEADERS = {
+    "Token": ALATION_API_TOKEN,
+    "Content-Type": "application/json"
+}
+
+def get_tableau_reports():
+    """Fetch all Tableau reports (workbooks/dashboards) from Alation"""
+    url = f"{ALATION_URL}/integration/v1/tableau/workbooks/"
+    reports = []
+    page = 1
+    
+    while True:
+        resp = requests.get(f"{url}?page={page}", headers=HEADERS)
+        if resp.status_code != 200:
+            raise Exception(f"Failed to fetch reports: {resp.text}")
+        
+        data = resp.json()
+        if not data.get("results"):
+            break
+        
+        reports.extend(data["results"])
+        page += 1
+    
+    return reports
+
+
+def get_report_metadata(report_id):
+    """Fetch metadata for a single Tableau report"""
+    url = f"{ALATION_URL}/integration/v1/tableau/workbooks/{report_id}/"
+    resp = requests.get(url, headers=HEADERS)
+    
+    if resp.status_code != 200:
+        raise Exception(f"Failed to fetch report {report_id}: {resp.text}")
+    
+    return resp.json()
+
+
+def get_datasource_metadata(datasource_id):
+    """Fetch datasource details (tables, db type, lineage)"""
+    url = f"{ALATION_URL}/integration/v1/tableau/datasources/{datasource_id}/"
+    resp = requests.get(url, headers=HEADERS)
+    
+    if resp.status_code != 200:
+        raise Exception(f"Failed to fetch datasource {datasource_id}: {resp.text}")
+    
+    return resp.json()
+
+
+def main():
+    all_reports = get_tableau_reports()
+    final_metadata = []
+
+    for report in all_reports:
+        report_id = report.get("id")
+        metadata = get_report_metadata(report_id)
+
+        report_info = {
+            "report_id": report_id,
+            "name": metadata.get("name"),
+            "description": metadata.get("description"),
+            "project": metadata.get("project_name"),
+            "owner": metadata.get("owner", {}).get("name"),
+            "datasources": []
+        }
+
+        # Fetch datasources if linked
+        for ds in metadata.get("datasources", []):
+            ds_id = ds.get("id")
+            ds_metadata = get_datasource_metadata(ds_id)
+
+            report_info["datasources"].append({
+                "name": ds_metadata.get("name"),
+                "type": ds_metadata.get("type"),  # oracle/sqlserver/snowflake etc.
+                "tables": ds_metadata.get("tables", []),
+                "schema": ds_metadata.get("schema")
+            })
+
+        final_metadata.append(report_info)
+
+    # Save JSON for chatbot ingestion
+    with open("tableau_reports_metadata.json", "w") as f:
+        json.dump(final_metadata, f, indent=4)
+
+
+if __name__ == "__main__":
+    main()
