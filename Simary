@@ -1,0 +1,56 @@
+from datasketch import MinHash, MinHashLSH
+import networkx as nx
+
+# -----------------------------
+# Step 1. Example Reports -> Replace with extracted features
+# -----------------------------
+reports = {
+    "Report_A": {"customer", "order", "sales_amount", "region"},
+    "Report_B": {"customer", "order", "sales_amount", "region", "profit_margin"},
+    "Report_C": {"product", "inventory", "stock_level"},
+    "Report_D": {"product", "inventory", "stock_level", "warehouse"},
+    "Report_E": {"customer", "order", "sales_amount"}  # near duplicate of A/B
+}
+
+# -----------------------------
+# Step 2. Build MinHash signatures
+# -----------------------------
+def build_minhash(features, num_perm=128):
+    m = MinHash(num_perm=num_perm)
+    for f in features:
+        m.update(f.encode("utf8"))
+    return m
+
+minhashes = {r: build_minhash(features) for r, features in reports.items()}
+
+# -----------------------------
+# Step 3. Insert into LSH
+# -----------------------------
+lsh = MinHashLSH(threshold=0.5, num_perm=128)
+for r, m in minhashes.items():
+    lsh.insert(r, m)
+
+# -----------------------------
+# Step 4. Build Graph of Similar Reports
+# -----------------------------
+G = nx.Graph()
+
+for r, m in minhashes.items():
+    sims = lsh.query(m)  # candidate neighbors
+    for s in sims:
+        if r == s:
+            continue
+        sim_score = minhashes[r].jaccard(minhashes[s])
+        if sim_score >= 0.6:  # tune threshold
+            G.add_edge(r, s, weight=sim_score)
+
+# -----------------------------
+# Step 5. Find Clusters (Connected Components)
+# -----------------------------
+clusters = []
+for comp in nx.connected_components(G):
+    clusters.append(list(comp))
+
+print("Clusters of similar reports:")
+for i, c in enumerate(clusters):
+    print(f"Cluster {i}: {c}")
